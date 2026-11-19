@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # The version lives here and in CHANGELOG.md; Build.cmd stops if they disagree.
 # Two-digit minor: 1.00, 1.01 ... 1.10. The release folder is "SSH Toolkit v<version>".
 $script:AppName     = 'SSH Toolkit'
-$script:AppVersion  = '1.00'
+$script:AppVersion  = '1.01'
 $script:Description = 'PowerShell/WPF tool for connecting to and running commands on home machines over SSH'
 $script:Copyright   = 'Copyright (c) 2026 Jason Rhodes'
 $script:RepoUrl     = 'https://github.com/jason4bury/SSH-Toolkit'
@@ -126,44 +126,66 @@ function New-Brush([string]$Hex) {
 }
 
 function New-XamlWindow {
-    <# Loads a window from XAML with the app's look (<!--THEME-->), its icon and a dark title bar. #>
+    <# Loads a window from XAML with the app's look (<!--THEME-->), its icon and a title bar to match. #>
     param([Parameter(Mandatory)][string]$Xaml, [Windows.Window]$Owner)
-    $reader = New-Object System.Xml.XmlNodeReader ([xml]($Xaml.Replace('<!--THEME-->', $script:ThemeXaml)))
+    # Colours are DynamicResource so Set-Theme can swap them in an open window (style values get frozen).
+    $text = $Xaml.Replace('<!--THEME-->', $script:ThemeXaml)
+    $text = [regex]::Replace($text, '\{StaticResource (' + (@($script:Colours.Keys) -join '|') + ')\}', '{DynamicResource $1}')
+    $reader = New-Object System.Xml.XmlNodeReader ([xml]$text)
     $w = [Windows.Markup.XamlReader]::Load($reader)
     if ($Owner -and $Owner.IsLoaded) { $w.Owner = $Owner } else { $w.WindowStartupLocation = 'CenterScreen' }
     if ($script:AppIcon) { $w.Icon = $script:AppIcon }
-    try {
-        $hwnd = (New-Object Windows.Interop.WindowInteropHelper $w).EnsureHandle()
-        $on = 1
-        [void][SshToolkit.Native]::DwmSetWindowAttribute($hwnd, 20, [ref]$on, 4)
-    } catch { Write-Verbose "No dark title bar: $($_.Exception.Message)" }
+    Set-TitleBar $w
     return $w
+}
+
+function Set-TitleBar([Windows.Window]$Window) {
+    <# Dark title bar in the dark theme, Windows' normal one in the light theme. #>
+    try {
+        $hwnd = (New-Object Windows.Interop.WindowInteropHelper $Window).EnsureHandle()
+        $on = [int][bool]$script:IsDark
+        [void][SshToolkit.Native]::DwmSetWindowAttribute($hwnd, 20, [ref]$on, 4)
+    } catch { Write-Verbose "No title bar colour: $($_.Exception.Message)" }
 }
 
 # ---------------------------------------------------------------------------
 #  Look (the app's own: dark, with a teal accent). Every window uses these.
 # ---------------------------------------------------------------------------
-$script:Colours = @{
-    Page = '#171B21'; Panel = '#1F252D'; Raised = '#2A313B'; Hover = '#252C35'; Line = '#38414D'
-    Ink = '#E6EAEE'; SoftInk = '#9AA5B1'; Accent = '#2FBF9F'; AccentInk = '#0C1A16'
-    Ok = '#5CCB7A'; Warn = '#E5B454'; Bad = '#E36A6A'; Unknown = '#6B7682'
+# Two palettes with the same names. Theme is Dark, Light or System (follow Windows' app mode).
+$script:Palettes = @{
+    Dark  = [ordered]@{
+        Page = '#171B21'; Panel = '#1F252D'; Raised = '#2A313B'; Hover = '#252C35'; Line = '#38414D'; Well = '#11151A'
+        Ink = '#E6EAEE'; SoftInk = '#9AA5B1'; Accent = '#2FBF9F'; AccentInk = '#0C1A16'
+        Ok = '#5CCB7A'; Warn = '#E5B454'; Bad = '#E36A6A'; Unknown = '#6B7682'
+    }
+    Light = [ordered]@{
+        Page = '#F3F5F7'; Panel = '#FFFFFF'; Raised = '#E3E8ED'; Hover = '#EDF1F4'; Line = '#C5CDD5'; Well = '#FFFFFF'
+        Ink = '#1B2128'; SoftInk = '#56616C'; Accent = '#14876D'; AccentInk = '#FFFFFF'
+        Ok = '#23893F'; Warn = '#9A6200'; Bad = '#C23434'; Unknown = '#7D8894'
+    }
 }
-$script:Brush = @{}
-foreach ($k in $script:Colours.Keys) { $script:Brush[$k] = New-Brush $script:Colours[$k] }
+$script:ThemeNames = [ordered]@{ System = 'Follow Windows'; Dark = 'Dark'; Light = 'Light' }
+$script:Theme = 'System'
 
-$script:ThemeXaml = @'
-<SolidColorBrush x:Key="Page" Color="#171B21"/>
-<SolidColorBrush x:Key="Panel" Color="#1F252D"/>
-<SolidColorBrush x:Key="Raised" Color="#2A313B"/>
-<SolidColorBrush x:Key="Hover" Color="#252C35"/>
-<SolidColorBrush x:Key="Line" Color="#38414D"/>
-<SolidColorBrush x:Key="Ink" Color="#E6EAEE"/>
-<SolidColorBrush x:Key="SoftInk" Color="#9AA5B1"/>
-<SolidColorBrush x:Key="Accent" Color="#2FBF9F"/>
-<SolidColorBrush x:Key="AccentInk" Color="#0C1A16"/>
-<SolidColorBrush x:Key="Ok" Color="#5CCB7A"/>
-<SolidColorBrush x:Key="Warn" Color="#E5B454"/>
-<SolidColorBrush x:Key="Bad" Color="#E36A6A"/>
+function Test-WindowsLightMode {
+    <# Windows' "app mode": $true for light, $false for dark. #>
+    try {
+        $v = Get-ItemPropertyValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'AppsUseLightTheme' -ErrorAction Stop
+        return ([int]$v -eq 1)
+    } catch { return $false }
+}
+
+function Use-Palette {
+    <# Picks the palette for $script:Theme and makes the brushes and the XAML colours from it. #>
+    $script:IsDark = switch ($script:Theme) { 'Dark' { $true } 'Light' { $false } default { -not (Test-WindowsLightMode) } }
+    $script:Colours = if ($script:IsDark) { $script:Palettes.Dark } else { $script:Palettes.Light }
+    $script:Brush = @{}
+    foreach ($k in $script:Colours.Keys) { $script:Brush[$k] = New-Brush $script:Colours[$k] }
+    $brushes = foreach ($k in $script:Colours.Keys) { '<SolidColorBrush x:Key="{0}" Color="{1}"/>' -f $k, $script:Colours[$k] }
+    $script:ThemeXaml = ($brushes -join "`r`n") + "`r`n" + $script:StyleXaml
+}
+
+$script:StyleXaml = @'
 <Style x:Key="Btn" TargetType="Button">
     <Setter Property="Foreground" Value="{StaticResource Ink}"/>
     <Setter Property="Background" Value="{StaticResource Raised}"/>
@@ -218,6 +240,7 @@ $script:ThemeXaml = @'
     <Setter Property="Margin" Value="0,10,0,4"/>
 </Style>
 '@
+Use-Palette
 
 # ---------------------------------------------------------------------------
 #  App-styled dialogs (no plain Windows message boxes)
@@ -361,6 +384,77 @@ function Show-About {
 #endregion ABOUT-BOX
 
 # ---------------------------------------------------------------------------
+#  Help (Help button or F1)
+# ---------------------------------------------------------------------------
+$script:HelpXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="600" Height="640" MinWidth="420" MinHeight="320" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13"
+        Background="{DynamicResource Page}" Foreground="{DynamicResource Ink}">
+    <Window.Resources><!--THEME--></Window.Resources>
+    <DockPanel Margin="22,16,22,12">
+        <Button x:Name="HelpClose" DockPanel.Dock="Bottom" Content="Close" Style="{StaticResource PrimaryBtn}" HorizontalAlignment="Right" Margin="0,12,0,0" IsDefault="True" IsCancel="True"/>
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="HelpBody" Margin="0,0,10,0"/>
+        </ScrollViewer>
+    </DockPanel>
+</Window>
+'@
+
+$script:HelpText = @(
+    @('Getting started', @(
+        'Click Add (bottom left) for each machine: a name, its address and SSH port (usually 22), the user to sign in as and, for Docker, its compose folder.',
+        'The dot beside each machine is green when its SSH port answers and red when it can''t be reached. It''s checked when the window opens, every minute and on Check now, and never signs in.',
+        'Edit changes a machine (for example a VM that got a new address); Remove takes it off the list.')),
+    @('First-time key setup', @(
+        'Commands in the window sign in with an SSH key, never a password. Pick a machine and click Key helper.',
+        'Step 1 makes a key on this PC (skip it if the helper says there''s one already).',
+        'Step 2 copies the key to the selected machine: Run it opens PowerShell, which asks for that machine''s password once. Do step 2 once per machine, then click Uptime to check it works.')),
+    @('The buttons', @(
+        'Open terminal: an SSH session in a terminal window. Double-clicking a machine does the same.',
+        'Disk space, Uptime, Docker ps: run on the machine and show the answer in the output box.',
+        'Restart machine: asks first, then opens a terminal for the sudo password.',
+        'Pull, Up, Down: Docker Compose in the machine''s compose folder. The compose project name (in Edit) is only needed if the stack was started under a name other than the folder''s. Down asks first.',
+        'Send files to it: pick files on this PC, then the folder on the machine to copy them to.',
+        'Get a file from it: browse the machine''s folders (double-click to open one, Up and Home to move around, or type a path and press Enter), pick one or more files and click Get, then choose the folder on this PC. Tick Show hidden files for files like .env.',
+        'Run a command: type any command that doesn''t ask questions and press Enter or Run.')),
+    @('When something goes wrong', @(
+        'Can''t reach a machine: check it''s switched on, and its address and port (Edit).',
+        'Sign-in turned down: the key isn''t on that machine yet. Do Key helper step 2 for it.',
+        'Identity changed: normal after a reinstall, or when a VM gets an address another machine had. If you know that''s what happened, click Forget old identity and try again.',
+        'A command that takes too long is stopped for you; Stop ends one at any time. Anything that asks a question (like sudo) needs Open terminal.')),
+    @('Light and dark', @(
+        'The Theme button (bottom right) switches between Follow Windows, Dark and Light. Follow Windows uses the light or dark app mode set in Windows Settings > Personalisation > Colours. Your choice is remembered.')),
+    @('Where settings live', @(
+        'Your machines and the log are in %APPDATA%\SSH Toolkit on this PC, never in the program folder, so updating SSH Toolkit doesn''t touch them. About shows the exact folder.'))
+)
+
+function Show-Help {
+    $w = New-XamlWindow $script:HelpXaml $script:Window
+    $w.Title = "$script:AppName help"
+    $body = $w.FindName('HelpBody')
+    $first = $true
+    foreach ($section in $script:HelpText) {
+        $h = New-Object Windows.Controls.TextBlock
+        $h.Text = $section[0].ToUpper()
+        $h.Style = $w.FindResource('Heading')
+        if ($first) { $h.Margin = '0,0,0,6'; $first = $false }
+        [void]$body.Children.Add($h)
+        foreach ($para in $section[1]) {
+            $t = New-Object Windows.Controls.TextBlock
+            $t.Text = $para
+            $t.TextWrapping = 'Wrap'
+            $t.LineHeight = 19
+            $t.Margin = '0,0,0,6'
+            [void]$body.Children.Add($t)
+        }
+    }
+    $w.FindName('HelpClose').Add_Click({ [Windows.Window]::GetWindow($this).Close() })
+    [void]$w.ShowDialog()
+}
+
+# ---------------------------------------------------------------------------
 #  Machines (saved in settings.json in the data folder)
 # ---------------------------------------------------------------------------
 function New-Machine {
@@ -373,6 +467,7 @@ function Read-Settings {
     if (Test-Path -LiteralPath $script:SettingsPath) {
         try {
             $s = Get-Content -LiteralPath $script:SettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($script:ThemeNames.Contains([string]$s.Theme)) { $script:Theme = [string]$s.Theme; Use-Palette }
             $list = @(foreach ($m in @($s.Machines)) {
                 if (-not $m -or -not $m.Name) { continue }
                 $port = 22
@@ -398,7 +493,7 @@ function Read-Settings {
 
 function Save-Settings {
     $rows = @(foreach ($m in $script:Machines) { [ordered]@{ Name = $m.Name; Address = $m.Address; Port = $m.Port; User = $m.User; Folder = $m.Folder; Project = $m.Project } })
-    try { ConvertTo-Json -InputObject ([ordered]@{ Machines = $rows }) -Depth 5 | Set-Content -LiteralPath $script:SettingsPath -Encoding UTF8 }
+    try { ConvertTo-Json -InputObject ([ordered]@{ Theme = $script:Theme; Machines = $rows }) -Depth 5 | Set-Content -LiteralPath $script:SettingsPath -Encoding UTF8 }
     catch { [void](Show-AppMessage -Kind Error -Text "The machines couldn't be saved:`n$($_.Exception.Message)") }
 }
 
@@ -458,9 +553,10 @@ function ConvertTo-ArgLine {
 }
 
 function ConvertTo-ShQuote([string]$Text) {
-    <# Quotes one word for the machine's (POSIX) shell. #>
+    <# Quotes one word for the machine's (POSIX) shell. A ' inside becomes '"'"' rather than '\''
+       because Windows' scp.exe turns backslashes in remote paths into forward slashes. #>
     if ($Text -match '^[A-Za-z0-9_./:=@%+,~-]+$') { return $Text }
-    return "'" + $Text.Replace("'", "'\''") + "'"
+    return "'" + $Text.Replace("'", "'`"'`"'") + "'"
 }
 
 # SSH commands don't read the login profile, so Synology's /usr/local/bin (docker) isn't on PATH.
@@ -482,9 +578,12 @@ function Get-SshArguments($Machine, [string]$Command, [switch]$Interactive, [swi
     return $a
 }
 
-function Get-ScpArguments($Machine, [string[]]$Paths, [switch]$Legacy) {
+function Get-ScpArguments($Machine, [string[]]$Paths, [switch]$Legacy, [switch]$QuotedNames) {
     $a = @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'LogLevel=ERROR')
     if ($Legacy) { $a = @('-O') + $a }
+    # scp -O compares the names it gets back with the (quoted) names asked for and refuses the
+    # copy when they differ; -T turns that check off. Only used for paths quoted by the app.
+    if ($Legacy -and $QuotedNames) { $a = @('-T') + $a }
     if ($Machine.Port -and $Machine.Port -ne 22) { $a += @('-P', [string]$Machine.Port) }
     return $a + $Paths
 }
@@ -757,19 +856,371 @@ function Send-Files {
 }
 
 function Receive-File {
+    <# Browse the machine, pick files, pick a folder on this PC, copy them there. #>
     $m = Get-SelectedMachine
     if (-not $m) { return }
-    $default = if ($m.Folder) { $m.Folder.TrimEnd('/') + '/' } else { '~/' }
-    $from = Show-AppInput -Title 'Get a file' -Prompt "Full path of the file on $($m.Name) to copy to this PC:" -Default $default -Hint "For example $($default)docker-compose.yml"
-    if (-not $from -or $from.EndsWith('/')) { return }
-    $dlg = New-Object Microsoft.Win32.SaveFileDialog
-    $dlg.Title = "Save the file from $($m.Name) as"
-    $dlg.FileName = ($from -split '/')[-1]
-    $dlg.InitialDirectory = Join-Path $env:USERPROFILE 'Downloads'
-    if (-not $dlg.ShowDialog($script:Window)) { return }
-    $paths = @(('{0}:{1}' -f (Get-Login $m), $from), $dlg.FileName)
-    Start-Remote -Machine $m -Title 'Get a file' -Exe 'scp.exe' -TimeoutSeconds 0 `
-        -Arguments (Get-ScpArguments $m $paths) -RetryArguments (Get-ScpArguments $m $paths -Legacy) -RetryWhen $script:NoSftp
+    $start = if ($m.Folder) { $m.Folder } else { '~' }
+    $files = @(Show-RemoteBrowser -Machine $m -Start $start)
+    if ($files.Count -eq 0) { return }
+    $to = Select-LocalFolder "Copy $($files.Count) file(s) from $($m.Name) to this folder:"
+    if (-not $to) { return }
+    $existing = @(foreach ($f in $files) { $n = ($f -split '/')[-1]; if (Test-Path -LiteralPath (Join-Path $to $n)) { $n } })
+    if ($existing.Count -gt 0) {
+        $ok = Show-AppMessage -Kind Question -Text ("Already in {0}:`n{1}`n`nReplace with the copies from {2}?" -f $to, ($existing -join "`n"), $m.Name) -YesText 'Replace' -NoText 'Cancel'
+        if (-not $ok) { return }
+    }
+    $login = Get-Login $m
+    # SFTP takes the path as it is; the older way (scp -O) hands it to the machine's shell, so it's quoted there.
+    $paths  = @(foreach ($f in $files) { '{0}:{1}' -f $login, $f }) + $to
+    $legacy = @(foreach ($f in $files) { '{0}:{1}' -f $login, (ConvertTo-ShQuote $f) }) + $to
+    Start-Remote -Machine $m -Title 'Get files' -Exe 'scp.exe' -TimeoutSeconds 0 `
+        -Arguments (Get-ScpArguments $m $paths) -RetryArguments (Get-ScpArguments $m $legacy -Legacy -QuotedNames) -RetryWhen $script:NoSftp
+}
+
+# Windows' own (Explorer-style) folder picker. The older FolderBrowserDialog tree doesn't reliably
+# open on the folder it's given.
+if (-not ('SshToolkit.FolderPicker' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace SshToolkit {
+    [ComImport, Guid("DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7")] internal class FileOpenDialogCom { }
+    [ComImport, Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IShellItem {
+        void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+        void GetParent(out IShellItem ppsi);
+        void GetDisplayName(uint sigdnName, [MarshalAs(UnmanagedType.LPWStr)] out string ppszName);
+        void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+        void Compare(IShellItem psi, uint hint, out int piOrder);
+    }
+    [ComImport, Guid("42f85136-db7e-439c-85f1-e4075d135fc8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IFileOpenDialog {
+        [PreserveSig] int Show(IntPtr parent);
+        void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+        void SetFileTypeIndex(uint iFileType);
+        void GetFileTypeIndex(out uint piFileType);
+        void Advise(IntPtr pfde, out uint pdwCookie);
+        void Unadvise(uint dwCookie);
+        void SetOptions(uint fos);
+        void GetOptions(out uint pfos);
+        void SetDefaultFolder(IShellItem psi);
+        void SetFolder(IShellItem psi);
+        void GetFolder(out IShellItem ppsi);
+        void GetCurrentSelection(out IShellItem ppsi);
+        void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+        void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+        void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+        void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+        void GetResult(out IShellItem ppsi);
+    }
+    public static class FolderPicker {
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+        private static extern void SHCreateItemFromParsingName(string pszPath, IntPtr pbc, ref Guid riid, out IShellItem ppv);
+        public static string Pick(IntPtr owner, string title, string okLabel, string start) {
+            IFileOpenDialog dlg = (IFileOpenDialog)new FileOpenDialogCom();
+            try {
+                uint options;
+                dlg.GetOptions(out options);
+                dlg.SetOptions(options | 0x20 | 0x40 | 0x800);   // pick folders, file system only, must exist
+                dlg.SetTitle(title);
+                dlg.SetOkButtonLabel(okLabel);
+                if (!string.IsNullOrEmpty(start)) {
+                    try { Guid g = typeof(IShellItem).GUID; IShellItem item; SHCreateItemFromParsingName(start, IntPtr.Zero, ref g, out item); dlg.SetFolder(item); }
+                    catch (Exception) { }
+                }
+                if (dlg.Show(owner) != 0) { return null; }
+                IShellItem result;
+                dlg.GetResult(out result);
+                string path;
+                result.GetDisplayName(0x80058000, out path);   // SIGDN_FILESYSPATH
+                return path;
+            } finally { Marshal.ReleaseComObject(dlg); }
+        }
+    }
+}
+'@
+}
+
+function Select-LocalFolder([string]$Title) {
+    <# Pick a folder on this PC, starting in the last one used (or Downloads). Returns the path or $null. #>
+    $start = Join-Path $env:USERPROFILE 'Downloads'
+    if ($script:LastGetFolder -and (Test-Path -LiteralPath $script:LastGetFolder)) { $start = $script:LastGetFolder }
+    $owner = (New-Object Windows.Interop.WindowInteropHelper $script:Window).Handle
+    $path = [SshToolkit.FolderPicker]::Pick($owner, $Title, 'Copy here', $start)
+    if (-not $path) { return $null }
+    $script:LastGetFolder = $path
+    return $path
+}
+
+# ---------------------------------------------------------------------------
+#  Remote file picker: lists a folder on the machine over SSH (in the background,
+#  so the window never freezes) and returns the files picked.
+# ---------------------------------------------------------------------------
+if (-not ('SshToolkit.FileRow' -as [type])) {
+    Add-Type -TypeDefinition 'namespace SshToolkit { public class FileRow { public string Name { get; set; } public string Glyph { get; set; } public string Size { get; set; } public string Modified { get; set; } public bool IsFolder { get; set; } } }'
+}
+
+$script:BrowseXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="700" Height="560" MinWidth="480" MinHeight="340" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13"
+        Background="{DynamicResource Page}" Foreground="{DynamicResource Ink}">
+    <Window.Resources>
+        <!--THEME-->
+        <Style x:Key="FileItem" TargetType="ListBoxItem">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="4" Padding="8,4" Margin="0,0,0,1">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource Hover}"/></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource Raised}"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <DockPanel Margin="18,16,18,10">
+        <Grid DockPanel.Dock="Top">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Button x:Name="BrUp" Content="Up" Style="{StaticResource Btn}" MinWidth="56"/>
+            <Button x:Name="BrHome" Grid.Column="1" Content="Home" Style="{StaticResource Btn}" MinWidth="56"/>
+            <TextBox x:Name="BrPath" Grid.Column="2" Style="{StaticResource Field}" FontFamily="Consolas" Margin="0,0,0,8"
+                     ToolTip="Type a folder and press Enter"/>
+        </Grid>
+        <Grid DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <CheckBox x:Name="BrHidden" Content="Show hidden files" Foreground="{StaticResource Ink}" VerticalAlignment="Center" Margin="2,0,0,8"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button x:Name="BrGet" Content="Get" Style="{StaticResource PrimaryBtn}" IsEnabled="False"/>
+                <Button x:Name="BrCancel" Content="Cancel" Style="{StaticResource Btn}" IsCancel="True" Margin="0,0,0,8"/>
+            </StackPanel>
+        </Grid>
+        <TextBlock x:Name="BrStatus" DockPanel.Dock="Bottom" Foreground="{StaticResource SoftInk}" TextWrapping="Wrap" Margin="2,8,0,0"/>
+        <Grid DockPanel.Dock="Top" Margin="11,4,27,4">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="90"/><ColumnDefinition Width="130"/></Grid.ColumnDefinitions>
+            <TextBlock Text="NAME" Style="{StaticResource Heading}" Margin="26,0,0,0"/>
+            <TextBlock Grid.Column="1" Text="SIZE" Style="{StaticResource Heading}" Margin="0,0,16,0" HorizontalAlignment="Right"/>
+            <TextBlock Grid.Column="2" Text="MODIFIED" Style="{StaticResource Heading}" Margin="0"/>
+        </Grid>
+        <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="6" Padding="2">
+            <ListBox x:Name="BrList" Background="Transparent" BorderThickness="0" SelectionMode="Extended"
+                     ItemContainerStyle="{StaticResource FileItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="90"/><ColumnDefinition Width="130"/></Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource Accent}" Width="18" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding Name}" Foreground="{StaticResource Ink}" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="{Binding Size}" Foreground="{StaticResource SoftInk}" HorizontalAlignment="Right" Margin="0,0,16,0"/>
+                            <TextBlock Grid.Column="2" Text="{Binding Modified}" Foreground="{StaticResource SoftInk}"/>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+    </DockPanel>
+</Window>
+'@
+
+function ConvertTo-RemoteDir([string]$Path) {
+    <# A folder for the machine's shell: ~ and ~/... become $HOME, everything else is quoted. #>
+    $p = $Path.Trim()
+    if (-not $p -or $p -eq '~') { return '"$HOME"' }
+    if ($p.StartsWith('~/')) { return '"$HOME"/' + (ConvertTo-ShQuote $p.Substring(2)) }
+    return (ConvertTo-ShQuote $p)
+}
+
+function Format-Size([long]$Bytes) {
+    if ($Bytes -lt 1KB) { return "$Bytes B" }
+    if ($Bytes -lt 1MB) { return ('{0:0.#} KB' -f ($Bytes / 1KB)) }
+    if ($Bytes -lt 1GB) { return ('{0:0.#} MB' -f ($Bytes / 1MB)) }
+    return ('{0:0.##} GB' -f ($Bytes / 1GB))
+}
+
+function Set-BrowseStatus([string]$Text, [string]$Tone = 'SoftInk') {
+    $s = $script:Browse.Window.FindName('BrStatus')
+    $s.Text = $Text
+    $s.Foreground = $script:Brush[$Tone]
+}
+
+function Stop-RemoteListing {
+    $b = $script:Browse
+    if ($b.Timer) { $b.Timer.Stop() }
+    if ($b.Proc) {
+        try { if (-not $b.Proc.HasExited) { $b.Proc.Kill() } } catch { Write-Verbose 'already ended' }
+        $b.Proc.Dispose()
+        $b.Proc = $null
+    }
+}
+
+function Start-RemoteListing([string]$Path) {
+    <# Starts listing $Path on the machine; Update-RemoteListing shows it when it arrives. #>
+    $b = $script:Browse
+    Stop-RemoteListing
+    $ssh = Find-OpenSsh 'ssh.exe'
+    if (-not $ssh) { Set-BrowseStatus "ssh.exe $script:NoOpenSsh" 'Bad'; return }
+    $globs = if ($b.Window.FindName('BrHidden').IsChecked) { '* .*' } else { '*' }
+    # Line 1 is the folder's full path, then one line per entry: type|size|modified (Unix time)|name.
+    $cmd = $script:PathPrefix + "command -v stat >/dev/null || exit 4; cd -- $(ConvertTo-RemoteDir $Path) 2>&1 || exit 3; pwd; stat -L -c '%F|%s|%Y|%n' -- $globs 2>/dev/null; exit 0"
+    $psi = New-Object Diagnostics.ProcessStartInfo
+    $psi.FileName = $ssh
+    $psi.Arguments = ConvertTo-ArgLine (Get-SshArguments $b.Machine $cmd)
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
+    try { $p = [Diagnostics.Process]::Start($psi) }
+    catch { Set-BrowseStatus "Couldn't start ssh.exe: $($_.Exception.Message)" 'Bad'; return }
+    try { $p.StandardInput.Close() } catch { Write-Verbose 'stdin already closed' }
+    $b.Proc = $p
+    $b.OutTask = $p.StandardOutput.ReadToEndAsync()
+    $b.ErrTask = $p.StandardError.ReadToEndAsync()
+    $b.Started = Get-Date
+    $b.Asked = $Path
+    $b.Window.FindName('BrList').IsEnabled = $false
+    Set-BrowseStatus "Opening $Path on $($b.Machine.Name)..."
+    $b.Timer.Start()
+}
+
+function Update-RemoteListing {
+    <# Timer tick: shows the listing once ssh has finished, or gives up after 20 seconds. #>
+    $b = $script:Browse
+    $p = $b.Proc
+    if (-not $p) { $b.Timer.Stop(); return }
+    if (-not ($p.HasExited -and $b.OutTask.IsCompleted -and $b.ErrTask.IsCompleted)) {
+        if (((Get-Date) - $b.Started).TotalSeconds -ge 20) {
+            Stop-RemoteListing
+            $b.Window.FindName('BrList').IsEnabled = $true
+            Set-BrowseStatus "$($b.Machine.Name) didn't answer within 20 seconds. Check it's switched on, then try again." 'Bad'
+        }
+        return
+    }
+    $b.Timer.Stop()
+    $code = $p.ExitCode
+    $out = $b.OutTask.Result
+    $err = $b.ErrTask.Result
+    $p.Dispose()
+    $b.Proc = $null
+    $list = $b.Window.FindName('BrList')
+    $list.IsEnabled = $true
+
+    if ($code -eq 3) {
+        $why = ($out.Trim() -split ':')[-1].Trim()
+        Set-BrowseStatus "Can't open $($b.Asked) on $($b.Machine.Name): $why." 'Bad'
+        return
+    }
+    if ($code -eq 4) { Set-BrowseStatus "$($b.Machine.Name) has no stat command, so its folders can't be listed." 'Bad'; return }
+    if ($code -ne 0) {
+        $friendly = Get-FriendlyError $err $b.Machine
+        if (-not $friendly) { $friendly = "Couldn't list the folder (exit code $code). $(($err.Trim() -split "`n")[0])" }
+        Write-AppLog "File picker on $($b.Machine.Name) failed ($code): $($err.Trim())"
+        Set-BrowseStatus $friendly 'Bad'
+        return
+    }
+
+    $lines = @($out -split "`r?`n" | Where-Object { $_ -ne '' })
+    $dir = $lines[0]
+    $rows = foreach ($line in @($lines | Select-Object -Skip 1)) {
+        $parts = $line.Split([char]'|', 4)
+        if ($parts.Count -lt 4 -or $parts[3] -eq '.' -or $parts[3] -eq '..') { continue }
+        $isFolder = $parts[0] -eq 'directory'
+        $size = 0L; [void][long]::TryParse($parts[1], [ref]$size)
+        $time = 0L; [void][long]::TryParse($parts[2], [ref]$time)
+        New-Object SshToolkit.FileRow -Property @{
+            Name     = $parts[3]
+            Glyph    = if ($isFolder) { [string][char]0xF12B } else { [string][char]0xE8A5 }
+            Size     = if ($isFolder) { '' } else { Format-Size $size }
+            Modified = [DateTimeOffset]::FromUnixTimeSeconds($time).LocalDateTime.ToString('yyyy-MM-dd HH:mm')
+            IsFolder = $isFolder
+        }
+    }
+    $rows = @($rows | Sort-Object @{ Expression = { -not $_.IsFolder } }, Name)
+    $list.ItemsSource = $rows
+    $b.Path = $dir
+    $b.Window.FindName('BrPath').Text = $dir
+    $folders = @($rows | Where-Object IsFolder).Count
+    $fileCount = $rows.Count - $folders
+    if ($rows.Count -eq 0) { Set-BrowseStatus 'This folder is empty.' }
+    else { Set-BrowseStatus "$folders folder(s), $fileCount file(s). Double-click a folder to open it; pick one or more files (Ctrl or Shift for several) and click Get." }
+}
+
+function Get-RemoteChild([string]$Name) {
+    $dir = $script:Browse.Path
+    if ($dir -eq '/') { return "/$Name" }
+    return "$dir/$Name"
+}
+
+function Complete-RemoteBrowser {
+    <# Get: return the selected files (folders are left out) and close. #>
+    $b = $script:Browse
+    $picked = @($b.Window.FindName('BrList').SelectedItems | Where-Object { -not $_.IsFolder } | ForEach-Object { Get-RemoteChild $_.Name })
+    if ($picked.Count -eq 0) { return }
+    $b.Result = $picked
+    $b.Window.Close()
+}
+
+function Show-RemoteBrowser {
+    <# The file picker for a machine. Returns the full paths of the files picked, or nothing. #>
+    param([Parameter(Mandatory)]$Machine, [string]$Start = '~')
+    $w = New-XamlWindow $script:BrowseXaml $script:Window
+    $w.Title = "Get files from $($Machine.Name)"
+    $timer = New-Object Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromMilliseconds(100)
+    $script:Browse = @{ Window = $w; Machine = $Machine; Timer = $timer; Proc = $null; Path = $Start; Asked = $Start; Result = $null }
+    $timer.Add_Tick({ Invoke-Safely { Update-RemoteListing } })
+
+    $w.FindName('BrUp').Add_Click({
+        $dir = $script:Browse.Path
+        if ($dir -and $dir -ne '/' -and $dir.StartsWith('/')) {
+            $parent = $dir.Substring(0, $dir.LastIndexOf('/'))
+            if (-not $parent) { $parent = '/' }
+            Start-RemoteListing $parent
+        }
+    })
+    $w.FindName('BrHome').Add_Click({ Start-RemoteListing '~' })
+    $hidden = $w.FindName('BrHidden')
+    $hidden.Add_Checked({ Start-RemoteListing $script:Browse.Path })
+    $hidden.Add_Unchecked({ Start-RemoteListing $script:Browse.Path })
+    $w.FindName('BrPath').Add_KeyDown({
+        param($s, $e)
+        if ($e.Key -eq 'Return') { $e.Handled = $true; Start-RemoteListing $s.Text }
+    })
+    $list = $w.FindName('BrList')
+    $list.Add_SelectionChanged({
+        $any = @($script:Browse.Window.FindName('BrList').SelectedItems | Where-Object { -not $_.IsFolder }).Count -gt 0
+        $script:Browse.Window.FindName('BrGet').IsEnabled = $any
+    })
+    $list.Add_MouseDoubleClick({
+        $item = $script:Browse.Window.FindName('BrList').SelectedItem
+        if (-not $item) { return }
+        if ($item.IsFolder) { Start-RemoteListing (Get-RemoteChild $item.Name) } else { Complete-RemoteBrowser }
+    })
+    $list.Add_KeyDown({
+        param($s, $e)
+        if ($e.Key -ne 'Return') { return }
+        $e.Handled = $true
+        $item = $s.SelectedItem
+        if ($item -and $item.IsFolder -and $s.SelectedItems.Count -eq 1) { Start-RemoteListing (Get-RemoteChild $item.Name) } else { Complete-RemoteBrowser }
+    })
+    $w.FindName('BrGet').Add_Click({ Complete-RemoteBrowser })
+    $w.FindName('BrCancel').Add_Click({ [Windows.Window]::GetWindow($this).Close() })
+    $w.Add_ContentRendered({ Start-RemoteListing $script:Browse.Path })
+    $w.Add_Closed({ Stop-RemoteListing })
+    [void]$w.ShowDialog()
+    $result = $script:Browse.Result
+    $script:Browse = $null
+    if ($result) { return $result }
 }
 
 # ---------------------------------------------------------------------------
@@ -897,7 +1348,7 @@ $script:EditXaml = @'
         <TextBox x:Name="EdUser" Style="{StaticResource Field}"/>
         <TextBlock Text="Compose folder (where docker-compose.yml is, and where files are sent to)" Style="{StaticResource Label}" TextWrapping="Wrap"/>
         <TextBox x:Name="EdFolder" Style="{StaticResource Field}" FontFamily="Consolas"/>
-        <TextBlock Text="Compose project name (optional: only if the stack was started under another name, like media on a Synology NAS)" Style="{StaticResource Label}" TextWrapping="Wrap"/>
+        <TextBlock Text="Compose project name (optional: only if the stack was started under another name, like myapp)" Style="{StaticResource Label}" TextWrapping="Wrap"/>
         <TextBox x:Name="EdProject" Style="{StaticResource Field}"/>
         <TextBlock x:Name="EdError" Foreground="{StaticResource Bad}" TextWrapping="Wrap" Margin="0,10,0,0"/>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
@@ -1190,15 +1641,19 @@ $script:MainXaml = @'
                 </Grid>
             </StackPanel>
             <TextBox x:Name="TxtOutput" Style="{StaticResource Field}" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
-                     Background="#11151A" VerticalContentAlignment="Top" TextWrapping="NoWrap" MinHeight="120"
+                     Background="{StaticResource Well}" VerticalContentAlignment="Top" TextWrapping="NoWrap" MinHeight="120"
                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
         </DockPanel>
 
         <!-- Status bar -->
         <Border Grid.Row="1" Grid.ColumnSpan="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0">
             <Grid Margin="14,6,14,6">
-                <TextBlock x:Name="TxtStatus" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,110,0"/>
-                <Button x:Name="BtnAbout" Content="About" Style="{StaticResource Btn}" HorizontalAlignment="Right" Padding="10,3" MinWidth="70" Margin="0"/>
+                <TextBlock x:Name="TxtStatus" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,380,0"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="BtnTheme" Style="{StaticResource Btn}" Padding="10,3" MinWidth="70" Margin="0,0,8,0" ToolTip="Click to switch: Follow Windows, Dark, Light"/>
+                    <Button x:Name="BtnHelp" Content="Help" Style="{StaticResource Btn}" Padding="10,3" MinWidth="70" Margin="0,0,8,0" ToolTip="Help (F1)"/>
+                    <Button x:Name="BtnAbout" Content="About" Style="{StaticResource Btn}" Padding="10,3" MinWidth="70" Margin="0"/>
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>
@@ -1252,12 +1707,38 @@ function Remove-Machine {
     }
 }
 
+function Switch-Theme {
+    <# The Theme button: Follow Windows -> Dark -> Light -> Follow Windows. #>
+    $names = @($script:ThemeNames.Keys)
+    $next = $names[($names.IndexOf($script:Theme) + 1) % $names.Count]
+    Set-Theme $next
+    Save-Settings
+    Set-Status "Theme: $($script:ThemeNames[$next])$(if ($next -eq 'System') { if ($script:IsDark) { ' (dark now)' } else { ' (light now)' } })."
+}
+
+function Set-Theme([string]$Name) {
+    <# Applies a theme to the open main window by recolouring its brushes; windows opened later use it too. #>
+    $script:Theme = $Name
+    Use-Palette
+    $w = $script:Window
+    if (-not $w) { return }
+    foreach ($k in $script:Colours.Keys) {
+        # The bare brush, not PowerShell's wrapper around it, or WPF sees a string.
+        $w.Resources.Remove($k)
+        $w.Resources.Add($k, $script:Brush[$k].psobject.BaseObject)
+    }
+    Set-TitleBar $w
+    $script:UI.BtnTheme.Content = "Theme: $($script:ThemeNames[$Name])"
+    $script:UI.TxtStatus.Foreground = $script:Brush.SoftInk
+    Update-MachineList
+}
+
 function Initialize-MainWindow {
     $w = New-XamlWindow $script:MainXaml
     $w.Title = $script:AppName
     $script:Window = $w
     $ui = @{}
-    foreach ($n in @('LstMachines', 'TxtChecked', 'BtnAdd', 'BtnCheck', 'TxtName', 'TxtState', 'TxtLogin', 'TxtFolder', 'BtnStop', 'BtnClear', 'TxtOutput', 'TxtStatus', 'BtnAbout') + $script:MachineControls) {
+    foreach ($n in @('LstMachines', 'TxtChecked', 'BtnAdd', 'BtnCheck', 'TxtName', 'TxtState', 'TxtLogin', 'TxtFolder', 'BtnStop', 'BtnClear', 'TxtOutput', 'TxtStatus', 'BtnAbout', 'BtnHelp', 'BtnTheme') + $script:MachineControls) {
         $ui[$n] = $w.FindName($n)
     }
     $script:UI = $ui
@@ -1285,6 +1766,12 @@ function Initialize-MainWindow {
     $ui.BtnStop.Add_Click({ Stop-Remote })
     $ui.BtnClear.Add_Click({ $script:UI.TxtOutput.Clear() })
     $ui.BtnAbout.Add_Click({ Show-About -Owner $script:Window })
+    $ui.BtnHelp.Add_Click({ Show-Help })
+    $w.Add_PreviewKeyDown({ param($s, $e) if ($e.Key -eq 'F1') { $e.Handled = $true; Show-Help } })
+    $ui.BtnTheme.Content = "Theme: $($script:ThemeNames[$script:Theme])"
+    $ui.BtnTheme.Add_Click({ Invoke-Safely { Switch-Theme } })
+    # Following Windows: pick up a change of Windows' app mode when the window is next used.
+    $w.Add_Activated({ if ($script:Theme -eq 'System' -and $script:IsDark -eq (Test-WindowsLightMode)) { Invoke-Safely { Set-Theme 'System' } } })
 
     $script:JobTimer = New-Object Windows.Threading.DispatcherTimer
     $script:JobTimer.Interval = [TimeSpan]::FromMilliseconds(150)

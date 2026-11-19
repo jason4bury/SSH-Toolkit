@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.01] - 2026-11-19
+
+### Added
+- Get a file from it now opens a file browser for the machine: folders first, then files with size and date; Up, Home and a path box; Show hidden files; pick one or more files and click Get, then choose the folder on this PC. Folders load in the background, and a machine that doesn't answer shows a plain message in the browser.
+- Light and dark themes: a Theme button (bottom right) switches between Follow Windows (the default), Dark and Light; the choice is saved in settings.json and every window follows it.
+- Help button (bottom right, or F1) with short help on getting started, the SSH key setup, every button, what to do when something goes wrong, and where settings live.
+
+### Changed
+- The example compose project name in the README and the Edit window is now `myapp`.
+
 ## [1.00] - 2026-11-18
 First release.
 

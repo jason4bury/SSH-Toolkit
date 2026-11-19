@@ -6,7 +6,7 @@
 
 One-click SSH to the NAS, the server and the laptop, with quick commands, key setup, file copy and Docker shortcuts.
 
-![Version](https://img.shields.io/badge/version-v1.00-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green) ![Last commit](https://img.shields.io/github/last-commit/jason4bury/SSH-Toolkit)
+![Version](https://img.shields.io/badge/version-v1.01-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green) ![Last commit](https://img.shields.io/github/last-commit/jason4bury/SSH-Toolkit)
 
 ## ✨ Features
 
@@ -17,9 +17,11 @@ SSH Toolkit is a PowerShell/WPF tool that keeps your home machines (a NAS, a Lin
 - **One-click connect**: **Open terminal** (or double-click a machine) opens an SSH session to it in a terminal window.
 - **Quick commands**: **Disk space**, **Uptime** and **Docker ps**, with the answer shown in the window, and **Restart machine** (asks first, then opens a terminal for the sudo password).
 - **Docker Compose shortcuts**: **Pull**, **Up** and **Down** in the machine's compose folder, using its compose project name when the stack was started under another name, so the right containers are touched. Down asks first.
-- **File copy**: **Send files to it...** copies files from this PC to a folder on the machine; **Get a file from it...** copies one back.
+- **File copy**: **Send files to it...** copies files from this PC to a folder on the machine; **Get a file from it...** opens a browser for the machine's folders: open folders with a double-click, tick **Show hidden files** if you need one, pick one or more files and click **Get**, then choose the folder on this PC to copy them to.
 - **SSH key helper**: the two commands that set up password-free sign-in, each in its own box with a **Copy** button and a **Run it** button.
 - **Run a command**: a box for any other command that doesn't ask questions.
+- **Light and dark**: a **Theme** button (bottom right) switches between Follow Windows (the default), Dark and Light, and remembers your choice.
+- **Help**: a **Help** button (or F1) explains every button in a few lines.
 - **Plain-English errors**: "Can't reach NAS", "NAS turned down the sign-in", "this machine's identity has changed" (with a button to forget the old one, for VMs that get a reused address) instead of raw ssh messages.
 
 ## 📋 Requirements
@@ -31,7 +33,7 @@ SSH Toolkit is a PowerShell/WPF tool that keeps your home machines (a NAS, a Lin
 
 ## 📦 Installation
 
-1. Download `SSH-Toolkit-v1.00.zip` from the [latest release](../../releases/latest) and unzip it wherever you like to keep it.
+1. Download `SSH-Toolkit-v1.01.zip` from the [latest release](../../releases/latest) and unzip it wherever you like to keep it.
 2. Double-click **SSH Toolkit.cmd** in the unzipped folder. It makes an **SSH Toolkit** shortcut there and in the Start menu, and starts the tool. From then on, use the shortcut, the Start menu, a pinned taskbar button or the Home Launcher.
 
 Nothing is installed and no Windows settings are changed. The shortcut runs the script with PowerShell's execution policy bypassed for that run only.
@@ -56,6 +58,8 @@ Double-click **Build.cmd** in the repo folder. It reads `build.json`, checks eve
 3. Click **Uptime**. If it answers in the output box, everything works.
 4. From then on, pick a machine and click what you need. Commands in the window run in the background, so the window stays usable; **Stop** ends one that takes too long.
 
+**Help** (bottom right, or F1) explains every button and what to do when something goes wrong.
+
 Commands in the window never ask for a password (they'd wait for an answer nobody can see), so anything that does ask, like `sudo`, needs **Open terminal**. **Restart machine** already does that for you.
 
 ## ⚙️ Configuration
@@ -74,7 +78,7 @@ Each machine has:
 | Port | `22` | The SSH port (usually 22). |
 | User | `admin` | The account to sign in as. |
 | Compose folder | `/volume1/docker` | Where `docker-compose.yml` is; Pull, Up and Down run there, and Send files starts there. |
-| Compose project | `media` | Only if the stack was started under a name other than the folder's (Synology Container Manager uses the project's name). |
+| Compose project | `myapp` | Only if the stack was started under a name other than the folder's (Synology Container Manager uses the project's name). |
 
 The key is Windows' usual one, `%USERPROFILE%\.ssh\id_ed25519`, so `ssh` in any terminal and other tools use it too. SSH Toolkit never stores a password.
 
