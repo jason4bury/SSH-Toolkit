@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.02] - 2026-11-19
+
+### Added
+- **Changed identity check.** Before Open terminal, a double-click on a machine, Restart, and Key
+  helper step 2 open a window, the toolkit quietly checks that the machine's identity (host key)
+  still matches the one this PC remembers. If it has changed (for example after a reinstall), it
+  shows the new fingerprint, the command to check it on the machine itself, and a **Forget old
+  identity** button, instead of opening a window full of ssh's "REMOTE HOST IDENTIFICATION HAS
+  CHANGED" warning. Commands run inside the window already offered this.
+
 ## [1.01] - 2026-11-19
 
 ### Added

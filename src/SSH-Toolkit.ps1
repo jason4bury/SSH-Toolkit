@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # The version lives here and in CHANGELOG.md; Build.cmd stops if they disagree.
 # Two-digit minor: 1.00, 1.01 ... 1.10. The release folder is "SSH Toolkit v<version>".
 $script:AppName     = 'SSH Toolkit'
-$script:AppVersion  = '1.01'
+$script:AppVersion  = '1.02'
 $script:Description = 'PowerShell/WPF tool for connecting to and running commands on home machines over SSH'
 $script:Copyright   = 'Copyright (c) 2026 Jason Rhodes'
 $script:RepoUrl     = 'https://github.com/jason4bury/SSH-Toolkit'
@@ -762,6 +762,43 @@ function Remove-KnownHost($Machine) {
     } catch { [void](Show-AppMessage -Kind Error -Text "Couldn't forget the old identity:`n$($_.Exception.Message)") }
 }
 
+function Test-HostKey {
+    <# Before a terminal or a PowerShell window opens to a machine: a quick, silent ssh (no
+       password, nothing run) to see whether the machine's identity (host key) still matches
+       the one this PC remembers. When it has changed, it shows the new fingerprint, says how
+       to check it on the machine itself, and offers to forget the old one. Returns $false
+       only when the identity changed and was left alone, so the caller doesn't open a
+       window that would just show ssh's warning. #>
+    param($Machine, [Windows.Window]$Owner = $script:Window)
+    $ssh = Find-OpenSsh 'ssh.exe'
+    if (-not $ssh) { return $true }
+    $err = ''
+    $p = $null
+    try { [Windows.Input.Mouse]::OverrideCursor = [Windows.Input.Cursors]::Wait } catch { Write-Verbose 'no cursor' }
+    try {
+        $si = New-Object Diagnostics.ProcessStartInfo
+        $si.FileName = $ssh
+        $si.Arguments = ConvertTo-ArgLine (Get-SshArguments $Machine 'exit')
+        $si.UseShellExecute = $false; $si.CreateNoWindow = $true
+        $si.RedirectStandardError = $true; $si.RedirectStandardOutput = $true
+        $p = [Diagnostics.Process]::Start($si)
+        $errTask = $p.StandardError.ReadToEndAsync()
+        if (-not $p.WaitForExit(12000)) { try { $p.Kill() } catch { Write-Verbose 'already ended' } }
+        if ($errTask.Wait(1000)) { $err = $errTask.Result }
+    } catch { return $true } finally { if ($p) { $p.Dispose() }; try { [Windows.Input.Mouse]::OverrideCursor = $null } catch { Write-Verbose 'no cursor' } }
+    if ($err -notmatch $script:HostKeyChanged) { return $true }
+    Write-AppLog "Host key changed for $($Machine.Name): $($err.Trim())"
+    $n = $Machine.Name
+    $fp = if ($err -match '(SHA256:[A-Za-z0-9+/=]+)') { $Matches[1] } else { '' }
+    $text = "$n's identity (host key) has changed since this PC last connected. That's normal after $n was reinstalled or rebuilt, or when it took over an address another machine had."
+    if ($fp) { $text += "`n`n$n now shows:`n$fp`n`nTo be sure it's really $n, run this on $n itself (its own screen, not over SSH) and check the SHA256 part matches:`nssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub" }
+    $text += "`n`nIf it matches, or you know $n was reinstalled, forget the old identity. If not, leave it: another machine could be pretending to be $n."
+    $forget = Show-AppMessage -Owner $Owner -Kind Warn -Title 'Identity changed' -Text $text -YesText 'Forget old identity' -NoText 'Leave it'
+    if (-not $forget) { Set-Status "Left $n's changed identity alone, so nothing was opened." 'Warn'; return $false }
+    Remove-KnownHost $Machine
+    return $true
+}
+
 function Invoke-RemoteCommand {
     <# Runs one shell command on the selected machine. #>
     param([string]$Title, [string]$Command, [int]$TimeoutSeconds = 60)
@@ -798,6 +835,7 @@ function Open-Terminal {
     param($Machine, [string]$Command)
     $ssh = Get-OpenSsh 'ssh.exe'
     if (-not $ssh) { return $false }
+    if (-not (Test-HostKey $Machine)) { return $false }
     $line = ConvertTo-ArgLine (Get-SshArguments $Machine $Command -Interactive -Tty:([bool]$Command))
     try {
         Start-Process -FilePath $ssh -ArgumentList $line
@@ -1508,6 +1546,8 @@ function Show-KeyHelper {
     $k.KeyRun2.Add_Click({
         if (-not (Test-Path -LiteralPath (Get-PublicKeyPath))) { Set-KeyNote 'Make the key first (step 1).' 'Bad'; return }
         $name = $script:Key.Machine.Name
+        Set-KeyNote "Checking $name's identity..." 'SoftInk'
+        if (-not (Test-HostKey $script:Key.Machine $script:Key.Window)) { Set-KeyNote "$name's identity has changed and was left alone, so the key wasn't copied." 'Bad'; return }
         if (Start-PowerShellWindow -Script $script:Key.KeyCmd2.Text -Title "SSH Toolkit - copy the key to $name") {
             Set-KeyNote "A PowerShell window is copying the key. Type $name's password there when it asks." 'Ok'
         }

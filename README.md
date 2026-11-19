@@ -6,7 +6,7 @@
 
 One-click SSH to the NAS, the server and the laptop, with quick commands, key setup, file copy and Docker shortcuts.
 
-![Version](https://img.shields.io/badge/version-v1.01-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green) ![Last commit](https://img.shields.io/github/last-commit/jason4bury/SSH-Toolkit)
+![Version](https://img.shields.io/badge/version-v1.02-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green) ![Last commit](https://img.shields.io/github/last-commit/jason4bury/SSH-Toolkit)
 
 ## ✨ Features
 
@@ -33,7 +33,7 @@ SSH Toolkit is a PowerShell/WPF tool that keeps your home machines (a NAS, a Lin
 
 ## 📦 Installation
 
-1. Download `SSH-Toolkit-v1.01.zip` from the [latest release](../../releases/latest) and unzip it wherever you like to keep it.
+1. Download `SSH-Toolkit-v1.02.zip` from the [latest release](../../releases/latest) and unzip it wherever you like to keep it.
 2. Double-click **SSH Toolkit.cmd** in the unzipped folder. It makes an **SSH Toolkit** shortcut there and in the Start menu, and starts the tool. From then on, use the shortcut, the Start menu, a pinned taskbar button or the Home Launcher.
 
 Nothing is installed and no Windows settings are changed. The shortcut runs the script with PowerShell's execution policy bypassed for that run only.
