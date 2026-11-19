@@ -1,0 +1,21 @@
+{
+  "AppName": "SSH Toolkit",
+  "EntryScript": "src\\SSH-Toolkit.ps1",
+  "Icon": "assets\\SSH-Toolkit.ico",
+  "Side": "Home",
+  "Description": "PowerShell/WPF tool for connecting to and running commands on home machines over SSH",
+  "RequireAdmin": false,
+  "Release": {
+    "Files": {
+      "SSH-Toolkit.ps1": "src\\SSH-Toolkit.ps1",
+      "New-SSHToolkitShortcut.ps1": "src\\New-SSHToolkitShortcut.ps1",
+      "SSH Toolkit.cmd": "release\\SSH Toolkit.cmd",
+      "assets\\SSH-Toolkit.ico": "assets\\SSH-Toolkit.ico",
+      "assets\\SSH-Toolkit.png": "assets\\SSH-Toolkit.png",
+      "README.md": "README.md",
+      "CHANGELOG.md": "CHANGELOG.md",
+      "LICENSE": "LICENSE"
+    },
+    "Shortcut": "New-SSHToolkitShortcut.ps1"
+  }
+}
